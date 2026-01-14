@@ -13,6 +13,15 @@ pub struct ContainerAttributes {
     /// Serde rename_all case style (from serde attribute)
     pub serde_rename_all: Option<String>,
 
+    /// Serde tag for internally/adjacently tagged enums
+    pub serde_tag: Option<String>,
+
+    /// Serde content field name for adjacently tagged enums
+    pub serde_content: Option<String>,
+
+    /// Serde untagged marker for enums
+    pub serde_untagged: bool,
+
     /// Custom validation function path (e.g., "validate_product" or "my_module::validate")
     pub validate: Option<String>,
 }
@@ -24,6 +33,9 @@ impl ContainerAttributes {
         title: Option<String>,
         examples: Vec<proc_macro2::TokenStream>,
         serde_rename_all: Option<String>,
+        serde_tag: Option<String>,
+        serde_content: Option<String>,
+        serde_untagged: bool,
         validate: Option<String>,
     ) -> Self {
         Self {
@@ -31,6 +43,9 @@ impl ContainerAttributes {
             title,
             examples,
             serde_rename_all,
+            serde_tag,
+            serde_content,
+            serde_untagged,
             validate,
         }
     }
@@ -42,6 +57,9 @@ impl ContainerAttributes {
             && self.title.is_none()
             && self.examples.is_empty()
             && self.serde_rename_all.is_none()
+            && self.serde_tag.is_none()
+            && self.serde_content.is_none()
+            && !self.serde_untagged
             && self.validate.is_none()
     }
 }

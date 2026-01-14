@@ -12,7 +12,7 @@ pub mod grok;
 #[cfg(feature = "openai")]
 pub mod openai;
 
-pub use client::LLMClient;
+pub use client::{LLMClient, MediaFile};
 pub use messages::{ChatMessage, ChatRole, MaterializeInternalOutput, ValidationFailureContext};
 pub use usage::{GenerateResult, MaterializeResult, TokenUsage};
 
@@ -45,8 +45,9 @@ pub struct ModelInfo {
     pub description: Option<String>,
 }
 pub(crate) use utils::{
-    ResponseFormat, check_response_status, generate_with_retry_with_history, handle_http_error,
-    parse_validate_and_create_output, prepare_strict_schema,
+    ResponseFormat, check_response_status, generate_with_retry_with_history,
+    generate_with_retry_with_messages, handle_http_error, parse_validate_and_create_output,
+    prepare_strict_schema,
 };
 
 /// Thinking level configuration for models that support extended reasoning.

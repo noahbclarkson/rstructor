@@ -4,7 +4,9 @@ pub use builder::SchemaBuilder;
 pub use custom_type::CustomTypeSchema;
 
 use crate::error::Result;
-use serde_json::Value;
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashMap};
+use chrono::NaiveDate;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 /// Helper function to call a struct's validate method if it exists
@@ -210,6 +212,193 @@ pub trait SchemaType {
     /// to reference the schema in their requests.
     fn schema_name() -> Option<String> {
         None
+    }
+}
+
+impl<T> SchemaType for Option<T>
+where
+    T: SchemaType,
+{
+    fn schema() -> Schema {
+        // Optional fields are handled by required lists in the derived schema.
+        T::schema()
+    }
+}
+
+impl<T> SchemaType for Box<T>
+where
+    T: SchemaType,
+{
+    fn schema() -> Schema {
+        T::schema()
+    }
+}
+
+impl<V> SchemaType for HashMap<String, V>
+where
+    V: SchemaType,
+{
+    fn schema() -> Schema {
+        let value_schema = V::schema().to_json();
+        let mut placeholder_schema = value_schema.clone();
+        if let Some(obj) = placeholder_schema.as_object_mut() {
+            obj.entry("description".to_string()).or_insert_with(|| {
+                Value::String(
+                    "Placeholder key. Use a real key string instead of this placeholder."
+                        .to_string(),
+                )
+            });
+        }
+        Schema::new(json!({
+            "type": "object",
+            "description": "Object map keyed by strings. Use meaningful keys; do not use the placeholder key.",
+            "properties": {
+                "KEY": placeholder_schema
+            },
+            "additionalProperties": value_schema,
+            "minProperties": 1
+        }))
+    }
+}
+
+impl<V> SchemaType for BTreeMap<String, V>
+where
+    V: SchemaType,
+{
+    fn schema() -> Schema {
+        let value_schema = V::schema().to_json();
+        let mut placeholder_schema = value_schema.clone();
+        if let Some(obj) = placeholder_schema.as_object_mut() {
+            obj.entry("description".to_string()).or_insert_with(|| {
+                Value::String(
+                    "Placeholder key. Use a real key string instead of this placeholder."
+                        .to_string(),
+                )
+            });
+        }
+        Schema::new(json!({
+            "type": "object",
+            "description": "Object map keyed by strings. Use meaningful keys; do not use the placeholder key.",
+            "properties": {
+                "KEY": placeholder_schema
+            },
+            "additionalProperties": value_schema,
+            "minProperties": 1
+        }))
+    }
+}
+
+impl SchemaType for NaiveDate {
+    fn schema() -> Schema {
+        Schema::new(json!({
+            "type": "string",
+            "format": "date"
+        }))
+    }
+}
+
+impl SchemaType for String {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "string" }))
+    }
+}
+
+impl SchemaType for bool {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "boolean" }))
+    }
+}
+
+impl SchemaType for i64 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for i32 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for i16 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for i8 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for isize {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for u64 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for u32 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for u16 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for u8 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for usize {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "integer" }))
+    }
+}
+
+impl SchemaType for f64 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "number" }))
+    }
+}
+
+impl SchemaType for f32 {
+    fn schema() -> Schema {
+        Schema::new(json!({ "type": "number" }))
+    }
+}
+
+impl<T> SchemaType for Vec<T>
+where
+    T: SchemaType,
+{
+    fn schema() -> Schema {
+        let item_schema = T::schema().to_json();
+        Schema::new(json!({
+            "type": "array",
+            "items": item_schema
+        }))
+    }
+}
+
+impl SchemaType for Value {
+    fn schema() -> Schema {
+        Schema::new(json!({
+            "type": ["object", "array", "string", "number", "integer", "boolean", "null"]
+        }))
     }
 }
 

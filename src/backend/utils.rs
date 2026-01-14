@@ -188,11 +188,11 @@ fn strip_gemini_unsupported_keywords(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
         // Remove unsupported keywords
         obj.remove("examples");
-        obj.remove("additionalProperties");
         obj.remove("title");
         obj.remove("$schema");
         obj.remove("$id");
         obj.remove("default");
+        obj.remove("additionalProperties");
 
         // Recursively process nested schemas
         if let Some(properties) = obj.get_mut("properties")
@@ -201,6 +201,10 @@ fn strip_gemini_unsupported_keywords(schema: &mut Value) {
             for (_key, prop_schema) in props_obj.iter_mut() {
                 strip_gemini_unsupported_keywords(prop_schema);
             }
+        }
+
+        if let Some(additional_properties) = obj.get_mut("additionalProperties") {
+            strip_gemini_unsupported_keywords(additional_properties);
         }
 
         // Process 'items' for arrays
@@ -577,7 +581,7 @@ pub async fn check_response_status(response: Response, provider_name: &str) -> R
 /// * `prompt` - The initial user prompt
 /// * `max_retries` - Maximum number of retry attempts (None or 0 means no retries)
 pub async fn generate_with_retry_with_history<F, Fut, T>(
-    mut generate_fn: F,
+    generate_fn: F,
     prompt: &str,
     max_retries: Option<usize>,
 ) -> Result<MaterializeInternalOutput<T>>
@@ -590,16 +594,36 @@ where
             >,
         >,
 {
+    generate_with_retry_with_messages(generate_fn, vec![ChatMessage::user(prompt)], max_retries)
+        .await
+}
+
+/// Helper function to execute generation with retry logic using seeded conversation history.
+///
+/// This works like `generate_with_retry_with_history`, but accepts an initial message list
+/// so callers can attach media to the first user message.
+pub async fn generate_with_retry_with_messages<F, Fut, T>(
+    mut generate_fn: F,
+    initial_messages: Vec<ChatMessage>,
+    max_retries: Option<usize>,
+) -> Result<MaterializeInternalOutput<T>>
+where
+    F: FnMut(Vec<ChatMessage>) -> Fut,
+    Fut: std::future::Future<
+            Output = std::result::Result<
+                MaterializeInternalOutput<T>,
+                (RStructorError, Option<ValidationFailureContext>),
+            >,
+        >,
+{
     let Some(max_retries) = max_retries.filter(|&n| n > 0) else {
-        // No retries configured - just run once with a single user message
-        let messages = vec![ChatMessage::user(prompt)];
-        return generate_fn(messages).await.map_err(|(err, _)| err);
+        return generate_fn(initial_messages).await.map_err(|(err, _)| err);
     };
 
     let max_attempts = max_retries + 1; // +1 for initial attempt
 
     // Initialize conversation history with the original user prompt
-    let mut messages = vec![ChatMessage::user(prompt)];
+    let mut messages = initial_messages;
 
     trace!(
         "Starting structured generation with conversation history: max_attempts={}",
@@ -635,11 +659,21 @@ where
                 // Handle validation errors with conversation history
                 if let RStructorError::ValidationError(ref msg) = err {
                     if !is_last_attempt {
-                        warn!(
-                            attempt = attempt + 1,
-                            error = msg,
-                            "Validation error in generation attempt"
-                        );
+                        if let Some(ctx) = validation_ctx.as_ref() {
+                            warn!(
+                                attempt = attempt + 1,
+                                error = msg,
+                                raw_response_len = ctx.raw_response.len(),
+                                raw_response = %ctx.raw_response,
+                                "Validation error in generation attempt"
+                            );
+                        } else {
+                            warn!(
+                                attempt = attempt + 1,
+                                error = msg,
+                                "Validation error in generation attempt"
+                            );
+                        }
 
                         // Build conversation history for retry with error feedback
                         if let Some(ctx) = validation_ctx {
@@ -674,11 +708,21 @@ where
                         sleep(Duration::from_millis(500)).await;
                         continue;
                     } else {
-                        error!(
-                            attempts = max_attempts,
-                            error = msg,
-                            "Failed after maximum retry attempts with validation errors"
-                        );
+                        if let Some(ctx) = validation_ctx.as_ref() {
+                            error!(
+                                attempts = max_attempts,
+                                error = msg,
+                                raw_response_len = ctx.raw_response.len(),
+                                raw_response = %ctx.raw_response,
+                                "Failed after maximum retry attempts with validation errors"
+                            );
+                        } else {
+                            error!(
+                                attempts = max_attempts,
+                                error = msg,
+                                "Failed after maximum retry attempts with validation errors"
+                            );
+                        }
                     }
                 }
                 // Handle retryable API errors (rate limits, transient failures)

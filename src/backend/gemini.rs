@@ -8,8 +8,9 @@ use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::backend::{
     ChatMessage, GenerateResult, LLMClient, MaterializeInternalOutput, MaterializeResult,
-    ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext, check_response_status,
-    generate_with_retry_with_history, handle_http_error, parse_validate_and_create_output,
+    MediaFile, ModelInfo, ThinkingLevel, TokenUsage, ValidationFailureContext,
+    check_response_status, generate_with_retry_with_history, generate_with_retry_with_messages,
+    handle_http_error, parse_validate_and_create_output,
 };
 use crate::error::{ApiErrorKind, RStructorError, Result};
 use crate::model::Instructor;
@@ -149,6 +150,7 @@ pub struct GeminiConfig {
 }
 
 /// Gemini client for generating completions
+#[derive(Clone)]
 pub struct GeminiClient {
     config: GeminiConfig,
     client: reqwest::Client,
@@ -163,8 +165,17 @@ struct Content {
 }
 
 #[derive(Debug, Serialize)]
-struct Part {
-    text: String,
+#[serde(untagged)]
+enum Part {
+    Text { text: String },
+    FileData { #[serde(rename = "fileData")] file_data: FileData },
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileData {
+    mime_type: String,
+    file_uri: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -355,11 +366,23 @@ impl GeminiClient {
                 } else {
                     msg.role.as_str()
                 };
+                let mut parts = Vec::new();
+                if !msg.content.is_empty() {
+                    parts.push(Part::Text {
+                        text: msg.content.clone(),
+                    });
+                }
+                for media in &msg.media {
+                    parts.push(Part::FileData {
+                        file_data: FileData {
+                            mime_type: media.mime_type.clone(),
+                            file_uri: media.uri.clone(),
+                        },
+                    });
+                }
                 Content {
                     role: Some(role.to_string()),
-                    parts: vec![Part {
-                        text: msg.content.clone(),
-                    }],
+                    parts,
                 }
             })
             .collect();
@@ -581,6 +604,32 @@ impl LLMClient for GeminiClient {
     }
 
     #[instrument(
+        name = "gemini_materialize_with_media",
+        skip(self, prompt, media),
+        fields(
+            type_name = std::any::type_name::<T>(),
+            model = %self.config.model.as_str(),
+            prompt_len = prompt.len(),
+            media_len = media.len()
+        )
+    )]
+    async fn materialize_with_media<T>(&self, prompt: &str, media: &[MediaFile]) -> Result<T>
+    where
+        T: Instructor + DeserializeOwned + Send + 'static,
+    {
+        let output = generate_with_retry_with_messages(
+            |messages: Vec<ChatMessage>| {
+                let this = self;
+                async move { this.materialize_internal::<T>(&messages).await }
+            },
+            vec![ChatMessage::user_with_media(prompt, media.to_vec())],
+            self.config.max_retries,
+        )
+        .await?;
+        Ok(output.data)
+    }
+
+    #[instrument(
         name = "gemini_materialize_with_metadata",
         skip(self, prompt),
         fields(
@@ -646,7 +695,7 @@ impl LLMClient for GeminiClient {
         let request = GenerateContentRequest {
             contents: vec![Content {
                 role: Some("user".to_string()),
-                parts: vec![Part {
+                parts: vec![Part::Text {
                     text: prompt.to_string(),
                 }],
             }],
